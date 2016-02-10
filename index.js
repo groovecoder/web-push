@@ -1,5 +1,6 @@
 const urlBase64 = require('urlsafe-base64');
 const crypto    = require('crypto');
+const jws       = require('jws');
 const ece       = require('http_ece');
 const url       = require('url');
 const https     = require('https');
@@ -46,7 +47,7 @@ function encrypt(userPublicKey, payload) {
   };
 }
 
-function sendNotification(endpoint, TTL, userPublicKey, payload) {
+function sendNotification(endpoint, TTL, userPublicKey, payload, vapid) {
   return new Promise(function(resolve, reject) {
     var urlParts = url.parse(endpoint);
     var options = {
@@ -69,6 +70,24 @@ function sendNotification(endpoint, TTL, userPublicKey, payload) {
         'Encryption': 'keyid=p256dh;salt=' + urlBase64.encode(encrypted.salt),
         'Content-Encoding': 'aesgcm128',
       };
+      if (vapid) {
+        var header = { typ: "JWT", alg: "ES256" };
+        var now = Math.floor(Date.now() / 1000);
+        var payload = { aud: vapid.audience, exp: now + 86400, sub: vapid.subject};
+        var appKeys = crypto.createECDH('prime256v1');
+        appKeys.generateKeys();
+        var signature = jws.sign({
+          header: header,
+          payload: payload,
+          privateKey: appKeys.getPrivateKey()
+        });
+        auth = "Bearer " +
+          urlBase64.encode(JSON.stringify(header)) + "." +
+          urlBase64.encode(JSON.stringify(payload)) + "." +
+          JSON.stringify(signature);
+        options['Authorization'] = auth;
+        options['Crypto-Key'] = "p256ecdsa=" + urlBase64.encode(appKeys.getPublicKey())
+      }
     }
 
     var gcmPayload;
